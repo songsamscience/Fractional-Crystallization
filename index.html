@@ -196,7 +196,7 @@
         <div class="cd">
             <h3>📈 용해도 곡선 (물 100g 기준)</h3>
             <div class="cw"><canvas id="ch"></canvas></div>
-            <p class="cn">🔴 빨간 점 = 현재 온도 위치</p>
+            <p class="cn">🔴 빨간 점·점선 = 현재 온도 / ➖ 색상 점선 = 투입 농도(물 100g 기준)</p>
             <button class="btn bgy" style="margin-top:8px;padding:7px;font-size:.76rem" onclick="togTbl()" id="tbB">📋 용해도 수치표 보기</button>
             <div id="tbW" style="display:none;overflow-x:auto">
                 <table class="st" id="solTbl"></table>
@@ -451,7 +451,7 @@ function cLp(){if(!S.cl)return;if(S.tp>S.tC){S.tp=Math.max(S.tp-.15,S.tC);uT();c
 function chkP(){if(S.step===2&&S.sA<.1&&S.sB<.1)document.getElementById('bCl').disabled=false;if(S.step===3&&(S.tp<=S.tC+.5||S.tp<=25))document.getElementById('bF').style.display='block'}
 
 // ═══════════════════════════════════════════════
-// Chart (한글명 표기)
+// Chart (현재 온도 세로 점선 & 물질 농도 가로 점선 추가)
 // ═══════════════════════════════════════════════
 let chart;
 function buildChart(){
@@ -460,27 +460,91 @@ function buildChart(){
     const tc=S.dk?'#94A3B8':'#64748B',gc=S.dk?'#334155':'#E2E8F0';
     const a=SUBS[S.selA],b=SUBS[S.selB];
     const temps=[0,10,20,30,40,50,60,70,80,90,100];
-    let maxY=0;temps.forEach(t=>{maxY=Math.max(maxY,solAt(S.selA,t),solAt(S.selB,t))});
+    
+    // y축 최댓값 계산 (입력한 가루의 환산 농도도 포함하여 잘리지 않게 조정)
+    let maxY=0;
+    temps.forEach(t=>{maxY=Math.max(maxY,solAt(S.selA,t),solAt(S.selB,t))});
+    maxY=Math.max(maxY, S.iA*(100/S.w), S.iB*(100/S.w));
     maxY=Math.ceil(maxY/20)*20+20;
-    chart=new Chart(c2,{type:'line',data:{labels:temps,datasets:[
-        {label:a.name,data:temps.map(t=>solAt(S.selA,t)),borderColor:a.color,backgroundColor:a.color+'20',borderWidth:2.5,pointRadius:0,tension:.4,fill:false},
-        {label:b.name,data:temps.map(t=>solAt(S.selB,t)),borderColor:b.color,backgroundColor:b.color+'20',borderWidth:2.5,pointRadius:0,tension:.4,fill:false},
-        {label:'현재 온도',type:'scatter',data:[{x:20,y:0}],backgroundColor:'#EF4444',borderColor:'#fff',borderWidth:2,pointRadius:7}
-    ]},options:{responsive:true,maintainAspectRatio:false,animation:false,interaction:{mode:'index',intersect:false},
-    scales:{x:{type:'linear',title:{display:true,text:'온도 (°C)',color:tc,font:{size:11}},min:0,max:100,ticks:{color:tc,stepSize:10},grid:{color:gc}},
-    y:{title:{display:true,text:'용해도 (g/물100g)',color:tc,font:{size:11}},min:0,max:maxY,ticks:{color:tc},grid:{color:gc}}},
-    plugins:{legend:{position:'top',labels:{boxWidth:10,font:{size:11,family:'Noto Sans KR'},color:tc}},tooltip:{enabled:false}}}});
+
+    // 커스텀 플러그인: 점선 그리기
+    const linePlugin = {
+        id: 'customLines',
+        beforeDraw: (chart) => {
+            const { ctx, chartArea: { top, bottom, left, right }, scales: { x, y } } = chart;
+            if(!x || !y) return;
+            ctx.save();
+
+            // 1. 현재 온도 세로 점선 (빨간색)
+            const tx = x.getPixelForValue(S.tp);
+            if(tx >= left && tx <= right) {
+                ctx.beginPath(); ctx.setLineDash([5, 5]); ctx.moveTo(tx, top); ctx.lineTo(tx, bottom);
+                ctx.lineWidth = 2; ctx.strokeStyle = '#EF4444'; ctx.stroke();
+            }
+
+            // 2. 물질 A 가로 점선 (물 100g 기준 환산 농도)
+            const va = S.iA * (100 / S.w);
+            const ya = y.getPixelForValue(va);
+            if(ya >= top && ya <= bottom) {
+                ctx.beginPath(); ctx.setLineDash([5, 5]); ctx.moveTo(left, ya); ctx.lineTo(right, ya);
+                ctx.lineWidth = 2.5; ctx.strokeStyle = a.color; ctx.globalAlpha = 0.6; ctx.stroke();
+            }
+
+            // 3. 물질 B 가로 점선 (물 100g 기준 환산 농도)
+            const vb = S.iB * (100 / S.w);
+            const yb = y.getPixelForValue(vb);
+            if(yb >= top && yb <= bottom) {
+                ctx.beginPath(); ctx.setLineDash([5, 5]); ctx.moveTo(left, yb); ctx.lineTo(right, yb);
+                ctx.lineWidth = 2.5; ctx.strokeStyle = b.color; ctx.globalAlpha = 0.6; ctx.stroke();
+            }
+
+            ctx.restore();
+        }
+    };
+
+    chart=new Chart(c2,{
+        type:'line',
+        data:{
+            labels:temps,
+            datasets:[
+                {label:a.name,data:temps.map(t=>solAt(S.selA,t)),borderColor:a.color,backgroundColor:a.color+'20',borderWidth:2.5,pointRadius:0,tension:.4,fill:false},
+                {label:b.name,data:temps.map(t=>solAt(S.selB,t)),borderColor:b.color,backgroundColor:b.color+'20',borderWidth:2.5,pointRadius:0,tension:.4,fill:false},
+                // 빨간 점은 시각적 기준을 위해 바닥(y:0)에 배치
+                {label:'현재 온도',type:'scatter',data:[{x:S.tp,y:0}],backgroundColor:'#EF4444',borderColor:'#fff',borderWidth:2,pointRadius:6}
+            ]
+        },
+        options:{
+            responsive:true,maintainAspectRatio:false,animation:false,interaction:{mode:'index',intersect:false},
+            scales:{
+                x:{type:'linear',title:{display:true,text:'온도 (°C)',color:tc,font:{size:11}},min:0,max:100,ticks:{color:tc,stepSize:10},grid:{color:gc}},
+                y:{title:{display:true,text:'용해도 (g/물100g)',color:tc,font:{size:11}},min:0,max:maxY,ticks:{color:tc},grid:{color:gc}}
+            },
+            plugins:{legend:{position:'top',labels:{boxWidth:10,font:{size:11,family:'Noto Sans KR'},color:tc}},tooltip:{enabled:false}}
+        },
+        plugins: [linePlugin] // 제작한 커스텀 플러그인 연결
+    });
 }
+
 function updateChartTheme(){
     if(!chart)return;
     const tc=S.dk?'#94A3B8':'#64748B',gc=S.dk?'#334155':'#E2E8F0';
     ['x','y'].forEach(a=>{chart.options.scales[a].ticks.color=tc;chart.options.scales[a].title.color=tc;chart.options.scales[a].grid.color=gc});
     chart.options.plugins.legend.labels.color=tc;chart.update();
 }
+
 function uCh(){
     if(!chart||!S.selA)return;
-    const y=Math.max(solAt(S.selA,S.tp),solAt(S.selB,S.tp));
-    chart.data.datasets[2].data=[{x:S.tp,y}];chart.update();
+    
+    // 양이나 물의 양이 실시간으로 변할 때 y축 최댓값을 동적으로 조정
+    let maxV=0;
+    const temps=[0,10,20,30,40,50,60,70,80,90,100];
+    temps.forEach(t=>{maxV=Math.max(maxV,solAt(S.selA,t),solAt(S.selB,t))});
+    maxV=Math.max(maxV, S.iA*(100/S.w), S.iB*(100/S.w));
+    chart.options.scales.y.max = Math.ceil(maxV/20)*20+20;
+    
+    // 현재 온도 점 위치 업데이트
+    chart.data.datasets[2].data=[{x:S.tp,y:0}]; 
+    chart.update();
 }
 
 // ═══════════════════════════════════════════════
